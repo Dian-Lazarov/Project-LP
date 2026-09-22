@@ -11,7 +11,7 @@ enum class SymbolClass {
     SEM,
     CONST_CLASS,
     TEMP,
-    UNDEFINED      // default value
+    UNDEFINED      // default
 };
 
 // Структура на записа в символната таблица
