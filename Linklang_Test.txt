@@ -1,31 +1,28 @@
 ﻿core {
   int alpha, beta;
+  int gamma = 10;
   shared count;
   sem mutex;
-
 
   alpha = 10;
   beta = alpha + 20 * 2;
 
-
   xin (alpha);
   xout ("Result is:");
   xout (beta);
-
 
   if (alpha) {
     beta = beta - 1;
   } else {
     beta = beta + 1;
   }
-
-
+  
   while (beta) {
     beta = beta - 1;
   }
 
 
-  for (alpha = 0 ; alpha ; alpha = alpha + 1) {
+  for (alpha = 0; alpha; alpha = alpha + 1) {
     xout (alpha);
   }
 
@@ -34,4 +31,4 @@
   wait (mutex);
   count = count + 1;
   signal (mutex);
-}
+} ;

@@ -234,13 +234,27 @@ public:
                 return { TokenType::COMMENT, comment, startLine, startCol, -1 };
             }
 
-            // Делители и оператори
+            // Разделители
             if (c == '{' || c == '}' || c == '(' || c == ')' || c == ';' || c == ',') {
                 string delim(1, advance());
                 return { TokenType::DELIMITER, delim, startLine, startCol, -1 };
             }
+
+            // Оператор за присвоянане и аритметични оператори
             if (c == '=' || c == '+' || c == '-' || c == '*' || c == '/') {
                 string op(1, advance());
+                return { TokenType::OPERATOR, op, startLine, startCol, -1 };
+            }
+
+            // Оператори за сравнение (<, <=, >, >=)
+            if (c == '<' || c == '>') {
+                string op = "";
+                op += advance(); // Консумираме '<' или '>'
+
+                // Проверяваме дали следващият символ е '='
+                if (peek() == '=') {
+                    op += advance(); // Консумираме '=' и операторът става '<=' или '>='
+                }
                 return { TokenType::OPERATOR, op, startLine, startCol, -1 };
             }
 
@@ -274,7 +288,7 @@ int main() {
         case TokenType::NUMBER: cout << "ЧИСЛО | " << token.lexeme << " (Поз. в табл: " << token.symTablePos << ")"; break;
         case TokenType::STRING_LITERAL: cout << "ТЕКСТ | " << token.lexeme; break;
         case TokenType::OPERATOR: cout << "ОПЕРАТОР | " << token.lexeme; break;
-        case TokenType::DELIMITER: cout << "ДЕЛИТЕЛ | " << token.lexeme; break;
+        case TokenType::DELIMITER: cout << "РАЗДЕЛИТЕЛ | " << token.lexeme; break;
         case TokenType::COMMENT: cout << "КОМЕНТАР | " << token.lexeme; break;
         case TokenType::ERROR_TOKEN: cout << "ГРЕШКА | Непознат символ: " << token.lexeme; break;
         case TokenType::END_OF_FILE: cout << "КРАЙ НА ФАЙЛА"; break;
