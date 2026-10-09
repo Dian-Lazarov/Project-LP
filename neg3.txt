@@ -1,0 +1,3 @@
+core {
+  xout ( #Hello World ) ;
+};

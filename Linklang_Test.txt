@@ -8,7 +8,7 @@
   gamma = alpha + beta;
 
   xin (alpha);
-  xout ("Result is: ");
+  xout (#Result is: #);
   xout (beta);
 
   if (alpha) {
@@ -30,4 +30,4 @@
   wait (mutex);
   count = count + 1;
   signal (mutex);
-} ;
+};
