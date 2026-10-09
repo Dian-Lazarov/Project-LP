@@ -1,14 +1,14 @@
 ﻿core {
-  int alpha, beta;
-  int gamma = 10;
+  int alpha, beta, gamma;
   shared count;
   sem mutex;
 
   alpha = 10;
-  beta = alpha + 20 * 2;
+  beta = 20;
+  gamma = alpha + beta;
 
   xin (alpha);
-  xout ("Result is:");
+  xout ("Result is: ");
   xout (beta);
 
   if (alpha) {
@@ -22,10 +22,9 @@
   }
 
 
-  for (alpha = 0; alpha; alpha = alpha + 1) {
+  for (alpha = 0; alpha<=15; alpha = alpha + 1) {
     xout (alpha);
   }
-
 
   init (mutex , 1);
   wait (mutex);

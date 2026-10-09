@@ -140,7 +140,7 @@ private:
     }
 
 public:
-    // Конструктор: зарежда файла и приема обръщение към символната таблица
+    // Конструктор: зарежда файла и прави обръщение към символната таблица
     Lexer(const string& filename, SymbolTable& table) : pos(0), line(1), col(1), symTable(table) {
         ifstream file(filename);
         if (!file.is_open()) {
@@ -150,6 +150,14 @@ public:
         stringstream buffer;
         buffer << file.rdbuf();
         source = buffer.str();
+
+        // Премахване на скрития маркер (UTF-8-BOM), ако съществува в началото
+        if (source.size() >= 3 &&
+            (unsigned char)source[0] == 0xEF &&
+            (unsigned char)source[1] == 0xBB &&
+            (unsigned char)source[2] == 0xBF) {
+            source.erase(0, 3);
+        }
     }
 
     Token getNextToken() {
