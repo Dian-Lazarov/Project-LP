@@ -219,7 +219,7 @@ public:
 				}
 				else {
 					// Ако стигнем нов ред или край на файл без затварящ диез (#)
-					return { TokenType::ERROR_TOKEN, "Незатворена текстова константа: " + strLit, startLine, startCol, -1 };
+					throw runtime_error("Лексикална грешка (Ред " + to_string(startLine) + ", Колона " + to_string(startCol) + "): Незатворена текстова константа");
 				}
 			}
 
@@ -286,13 +286,13 @@ public:
 				}
 				else {
 					// Тъй като '?' и '@' не са самостоятелни оператори, липсата на '=' след тях е лексикална грешка.
-					return { TokenType::ERROR_TOKEN, op, startLine, startCol, -1 };
+					throw runtime_error("Лексикална грешка (Ред " + to_string(startLine) + ", Колона " + to_string(startCol) + "): Непознат символ '" + op + "'");
 				}
 			}
 
 			// Непознат символ
 			string err(1, advance());
-			return { TokenType::ERROR_TOKEN, err, startLine, startCol, -1 };
+			throw runtime_error("Лексикална грешка (Ред " + to_string(startLine) + ", Колона " + to_string(startCol) + "): Непознат символ '" + err + "'");
 		}
 
 		return { TokenType::END_OF_FILE, "EOF", line, col, -1 };
@@ -309,28 +309,33 @@ int main() {
 
 	cout << "=== Токени ===" << endl;
 	Token token;
-	do {
-		token = lexer.getNextToken();
 
-		cout << "Ред " << token.line << ", Колона " << token.col << " \t";
+	try {
+		do {
+			token = lexer.getNextToken();
 
-		switch (token.type) {
-		case TokenType::KEYWORD: cout << "КЛЮЧОВА ДУМА | " << token.lexeme; break;
-		case TokenType::IDENTIFIER: cout << "ИДЕНТИФИКАТОР | " << token.lexeme << " (Поз. в табл: " << token.symTablePos << ")"; break;
-		case TokenType::NUMBER: cout << "ЧИСЛО | " << token.lexeme << " (Поз. в табл: " << token.symTablePos << ")"; break;
-		case TokenType::STRING_LITERAL: cout << "ТЕКСТ | " << token.lexeme; break;
-		case TokenType::OPERATOR: cout << "ОПЕРАТОР | " << token.lexeme; break;
-		case TokenType::DELIMITER: cout << "РАЗДЕЛИТЕЛ | " << token.lexeme; break;
-		case TokenType::COMMENT: cout << "КОМЕНТАР | " << token.lexeme; break;
-		case TokenType::ERROR_TOKEN: cout << "ГРЕШКА | Непознат символ: " << token.lexeme; break;
-		case TokenType::END_OF_FILE: cout << "КРАЙ НА ФАЙЛА"; break;
-		}
-		cout << endl;
+			if (token.type != TokenType::END_OF_FILE) {
+				cout << "Ред " << token.line << ", Колона " << token.col << " \t";
+				switch (token.type) {
+				case TokenType::KEYWORD: cout << "КЛЮЧОВА ДУМА | " << token.lexeme; break;
+				case TokenType::IDENTIFIER: cout << "ИДЕНТИФИКАТОР | " << token.lexeme << " (Поз: " << token.symTablePos << ")"; break;
+				case TokenType::NUMBER: cout << "ЧИСЛО | " << token.lexeme << " (Поз: " << token.symTablePos << ")"; break;
+				case TokenType::STRING_LITERAL: cout << "ТЕКСТ | " << token.lexeme; break;
+				case TokenType::OPERATOR: cout << "ОПЕРАТОР | " << token.lexeme; break;
+				case TokenType::DELIMITER: cout << "РАЗДЕЛИТЕЛ | " << token.lexeme; break;
+				case TokenType::COMMENT: cout << "КОМЕНТАР | " << token.lexeme; break;
+				}
+				cout << endl;
+			}
+		} while (token.type != TokenType::END_OF_FILE);
 
-	} while (token.type != TokenType::END_OF_FILE);
+		// Отпечатваме таблицата само ако лексикалният анализ е минал успешно
+		symTable.printTable();
 
-	// Отпечатваме състоянието на символната таблица след лексикалния анализ
-	symTable.printTable();
+	}
+	catch (const runtime_error& e) {
+		cerr << "\nПРЕКЪСВАНЕ: " << e.what() << endl;
+	}
 
 	return 0;
 }
