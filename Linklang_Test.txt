@@ -30,4 +30,4 @@
   wait (mutex);
   count = count + 1;
   signal (mutex);
-};
+  };
