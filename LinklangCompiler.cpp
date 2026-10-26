@@ -88,7 +88,7 @@ public:
 };
 
 // ==========================================
-// Лексикален анализатор
+// Лексикален анализатор (Lexer)
 // ==========================================
 enum class TokenType {
 	KEYWORD,
@@ -299,13 +299,266 @@ public:
 	}
 };
 
+// ==========================================
+// Синтактичен анализатор (Parser)
+// ==========================================
+class Parser {
+private:
+	Lexer& lexer;
+	Token currentToken;
+
+	// Извлича следващия токен, като автоматично прескача коментарите
+	void nextToken() {
+		do {
+			currentToken = lexer.getNextToken();
+		} while (currentToken.type == TokenType::COMMENT);
+	}
+
+	// Проверява дали текущият токен съвпада с очаквания. Ако да - продължава напред.
+	void match(TokenType expectedType, const string& expectedLexeme = "") {
+		if (currentToken.type == expectedType &&
+			(expectedLexeme == "" || currentToken.lexeme == expectedLexeme)) {
+			nextToken();
+		}
+		else {
+			string expected = expectedLexeme != "" ? expectedLexeme : "тип " + to_string((int)expectedType);
+			throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
+				", Колона " + to_string(currentToken.col) +
+				"): Очаква се '" + expected + "', но е намерено '" + currentToken.lexeme + "'");
+		}
+	}
+
+public:
+	Parser(Lexer& lex) : lexer(lex) {
+		nextToken(); // Инициализация с първия токен
+	}
+
+	// program -> "core" "{" decl_part stm_list "}" ";"
+	void parseProgram() {
+		match(TokenType::KEYWORD, "core");
+		match(TokenType::DELIMITER, "{");
+
+		parseDeclPart();
+		parseStmList();
+
+		match(TokenType::DELIMITER, "}");
+		match(TokenType::DELIMITER, ";");
+
+		if (currentToken.type != TokenType::END_OF_FILE) {
+			throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
+				"): Излишни символи след края на програмата.");
+		}
+	}
+
+private:
+	// decl_part -> { decl }
+	void parseDeclPart() {
+		while (currentToken.type == TokenType::KEYWORD && currentToken.lexeme == "int") {
+			parseDecl();
+		}
+	}
+
+	// decl -> "int" idlist ";"
+	void parseDecl() {
+		match(TokenType::KEYWORD, "int");
+		parseIdList();
+		match(TokenType::DELIMITER, ";");
+	}
+
+	// idlist -> Ident { "," Ident }
+	void parseIdList() {
+		match(TokenType::IDENTIFIER);
+		while (currentToken.type == TokenType::DELIMITER && currentToken.lexeme == ",") {
+			match(TokenType::DELIMITER, ",");
+			match(TokenType::IDENTIFIER);
+		}
+	}
+
+	// stm_list -> { stm }
+	void parseStmList() {
+		while (currentToken.type == TokenType::IDENTIFIER ||
+			(currentToken.type == TokenType::KEYWORD &&
+				(currentToken.lexeme == "if" || currentToken.lexeme == "while" ||
+					currentToken.lexeme == "for" || currentToken.lexeme == "xin" ||
+					currentToken.lexeme == "xout"))) {
+			parseStm();
+		}
+	}
+
+	// stm -> assign_stm ";" | if_stm | while_stm | for_stm | io_stm ";"
+	void parseStm() {
+		if (currentToken.type == TokenType::IDENTIFIER) {
+			parseAssignStm();
+			match(TokenType::DELIMITER, ";");
+		}
+		else if (currentToken.lexeme == "if") {
+			parseIfStm();
+		}
+		else if (currentToken.lexeme == "while") {
+			parseWhileStm();
+		}
+		else if (currentToken.lexeme == "for") {
+			parseForStm();
+		}
+		else if (currentToken.lexeme == "xin" || currentToken.lexeme == "xout") {
+			parseIoStm();
+			match(TokenType::DELIMITER, ";");
+		}
+	}
+
+	// assign_stm -> Ident "=" expr
+	void parseAssignStm() {
+		match(TokenType::IDENTIFIER);
+		match(TokenType::OPERATOR, "=");
+		parseExpr();
+	}
+
+	// if_stm -> "if" "(" expr ")" "{" stm_list "}" [ "else" "{" stm_list "}" ]
+	void parseIfStm() {
+		match(TokenType::KEYWORD, "if");
+		match(TokenType::DELIMITER, "(");
+		parseExpr();
+		match(TokenType::DELIMITER, ")");
+
+		match(TokenType::DELIMITER, "{");
+		parseStmList();
+		match(TokenType::DELIMITER, "}");
+
+		if (currentToken.type == TokenType::KEYWORD && currentToken.lexeme == "else") {
+			match(TokenType::KEYWORD, "else");
+			match(TokenType::DELIMITER, "{");
+			parseStmList();
+			match(TokenType::DELIMITER, "}");
+		}
+	}
+
+	// while_stm -> "while" "(" expr ")" "{" stm_list "}"
+	void parseWhileStm() {
+		match(TokenType::KEYWORD, "while");
+		match(TokenType::DELIMITER, "(");
+		parseExpr();
+		match(TokenType::DELIMITER, ")");
+
+		match(TokenType::DELIMITER, "{");
+		parseStmList();
+		match(TokenType::DELIMITER, "}");
+	}
+
+	// for_stm -> "for" "(" assign_stm ";" expr ";" assign_stm ")" "{" stm_list "}"
+	void parseForStm() {
+		match(TokenType::KEYWORD, "for");
+		match(TokenType::DELIMITER, "(");
+		parseAssignStm();
+		match(TokenType::DELIMITER, ";");
+		parseExpr();
+		match(TokenType::DELIMITER, ";");
+		parseAssignStm();
+		match(TokenType::DELIMITER, ")");
+
+		match(TokenType::DELIMITER, "{");
+		parseStmList();
+		match(TokenType::DELIMITER, "}");
+	}
+
+	// io_stm -> "xin" "(" Ident ")" | "xout" "(" expr ")" | "xout" "(" String ")"
+	void parseIoStm() {
+		if (currentToken.lexeme == "xin") {
+			match(TokenType::KEYWORD, "xin");
+			match(TokenType::DELIMITER, "(");
+			match(TokenType::IDENTIFIER);
+			match(TokenType::DELIMITER, ")");
+		}
+		else if (currentToken.lexeme == "xout") {
+			match(TokenType::KEYWORD, "xout");
+			match(TokenType::DELIMITER, "(");
+			if (currentToken.type == TokenType::STRING_LITERAL) {
+				match(TokenType::STRING_LITERAL);
+			}
+			else {
+				parseExpr();
+			}
+			match(TokenType::DELIMITER, ")");
+		}
+	}
+
+	// Изразите (Expression parsing rules)
+	void parseExpr() {
+		parseAndExpr();
+		while (currentToken.lexeme == "or") {
+			match(TokenType::KEYWORD, "or");
+			parseAndExpr();
+		}
+	}
+
+	void parseAndExpr() {
+		parseRelExpr();
+		while (currentToken.lexeme == "and") {
+			match(TokenType::KEYWORD, "and");
+			parseRelExpr();
+		}
+	}
+
+	void parseRelExpr() {
+		parseAddExpr();
+		if (currentToken.type == TokenType::OPERATOR &&
+			(currentToken.lexeme == "<" || currentToken.lexeme == "<=" ||
+				currentToken.lexeme == ">" || currentToken.lexeme == ">=" ||
+				currentToken.lexeme == "?=" || currentToken.lexeme == "@=")) {
+			match(TokenType::OPERATOR);
+			parseAddExpr();
+		}
+	}
+
+	void parseAddExpr() {
+		parseTerm();
+		while (currentToken.lexeme == "+" || currentToken.lexeme == "-") {
+			match(TokenType::OPERATOR);
+			parseTerm();
+		}
+	}
+
+	void parseTerm() {
+		parseFactor();
+		while (currentToken.lexeme == "*" || currentToken.lexeme == "/") {
+			match(TokenType::OPERATOR);
+			parseFactor();
+		}
+	}
+
+	void parseFactor() {
+		if (currentToken.type == TokenType::IDENTIFIER) {
+			match(TokenType::IDENTIFIER);
+		}
+		else if (currentToken.type == TokenType::NUMBER) {
+			match(TokenType::NUMBER);
+		}
+		else if (currentToken.lexeme == "(") {
+			match(TokenType::DELIMITER, "(");
+			parseExpr();
+			match(TokenType::DELIMITER, ")");
+		}
+		else if (currentToken.lexeme == "not") {
+			match(TokenType::KEYWORD, "not");
+			parseFactor();
+		}
+		else if (currentToken.lexeme == "-") {
+			match(TokenType::OPERATOR, "-");
+			parseFactor();
+		}
+		else {
+			throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
+				", Колона " + to_string(currentToken.col) + "): Невалиден израз.");
+		}
+	}
+};
+
 int main() {
 	system("chcp 1251 > nul");
 
-	SymbolTable symTable;
+	/*SymbolTable symTable;
 
 	// Подаваме името на текстовия файл и правим обръщение към символната таблица
-	Lexer lexer("Linklang_Test.txt", symTable);
+	Lexer lexer("Linklang_Test_Lex.txt", symTable);
 
 	cout << "=== Токени ===" << endl;
 	Token token;
@@ -330,6 +583,23 @@ int main() {
 		} while (token.type != TokenType::END_OF_FILE);
 
 		// Отпечатваме таблицата само ако лексикалният анализ е минал успешно
+		symTable.printTable();
+
+	}
+	catch (const runtime_error& e) {
+		cerr << "\nПРЕКЪСВАНЕ: " << e.what() << endl;
+	}*/
+
+	SymbolTable symTable;
+	Lexer lexer("Linklang_Test_Syn.txt", symTable);
+	Parser parser(lexer);
+
+	try {
+		cout << "Стартиране на синтактичен анализ..." << endl;
+
+		parser.parseProgram();
+
+		cout << "УСПЕХ: Синтактичният анализ приключи без грешки!" << endl;
 		symTable.printTable();
 
 	}

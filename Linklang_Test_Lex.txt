@@ -1,8 +1,6 @@
 ﻿core {
   int alpha, beta, gamma;
-  shared count;
-  sem mutex;
-
+  
   alpha = 10;
   beta = 20;
   gamma = alpha + beta;
@@ -25,9 +23,4 @@
   for (alpha = 0; alpha<=15; alpha = alpha + 1) {
     xout (alpha);
   }
-
-  init (mutex , 1);
-  wait (mutex);
-  count = count + 1;
-  signal (mutex);
-  };
+};
