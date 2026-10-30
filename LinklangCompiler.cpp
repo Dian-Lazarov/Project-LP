@@ -306,6 +306,7 @@ class Parser {
 private:
 	Lexer& lexer;
 	Token currentToken;
+	bool hasError = false; // Флаг за отчитане на грешки
 
 	// Извлича следващия токен, като автоматично прескача коментарите
 	void nextToken() {
@@ -328,9 +329,40 @@ private:
 		}
 	}
 
+	// Метод за възстановяване от синтактична грешка
+	void synchronize() {
+		hasError = true;
+		nextToken(); // Прескачаме проблемния токен
+
+		while (currentToken.type != TokenType::END_OF_FILE) {
+			// Ако сме стигнали край на оператор
+			if (currentToken.lexeme == ";") {
+				nextToken();
+				return;
+			}
+
+			// Ако сме стигнали началото на нова декларация или оператор
+			if (currentToken.type == TokenType::KEYWORD) {
+				if (currentToken.lexeme == "int" || currentToken.lexeme == "shared" ||
+					currentToken.lexeme == "sem" || currentToken.lexeme == "if" ||
+					currentToken.lexeme == "while" || currentToken.lexeme == "for" ||
+					currentToken.lexeme == "xin" || currentToken.lexeme == "xout" ||
+					currentToken.lexeme == "init" || currentToken.lexeme == "wait" ||
+					currentToken.lexeme == "signal") {
+					return;
+				}
+			}
+			nextToken();
+		}
+	}
+
 public:
 	Parser(Lexer& lex) : lexer(lex) {
 		nextToken(); // Инициализация с първия токен
+	}
+
+	bool hadError() const {
+		return hasError;
 	}
 
 	// program -> "core" "{" decl_part stm_list "}" ";"
@@ -353,8 +385,15 @@ public:
 private:
 	// decl_part -> { decl }
 	void parseDeclPart() {
-		while (currentToken.type == TokenType::KEYWORD && currentToken.lexeme == "int") {
-			parseDecl();
+		while (currentToken.type == TokenType::KEYWORD &&
+			(currentToken.lexeme == "int" || currentToken.lexeme == "shared" || currentToken.lexeme == "sem")) {
+			try {
+				parseDecl();
+			}
+			catch (const runtime_error& e) {
+				cerr << e.what() << endl;
+				synchronize();
+			}
 		}
 	}
 
@@ -380,8 +419,15 @@ private:
 			(currentToken.type == TokenType::KEYWORD &&
 				(currentToken.lexeme == "if" || currentToken.lexeme == "while" ||
 					currentToken.lexeme == "for" || currentToken.lexeme == "xin" ||
-					currentToken.lexeme == "xout"))) {
-			parseStm();
+					currentToken.lexeme == "xout" || currentToken.lexeme == "init" ||
+					currentToken.lexeme == "wait" || currentToken.lexeme == "signal"))) {
+			try {
+				parseStm();
+			}
+			catch (const runtime_error& e) {
+				cerr << e.what() << endl;
+				synchronize();
+			}
 		}
 	}
 
@@ -555,56 +601,24 @@ private:
 int main() {
 	system("chcp 1251 > nul");
 
-	/*SymbolTable symTable;
-
-	// Подаваме името на текстовия файл и правим обръщение към символната таблица
-	Lexer lexer("Linklang_Test_Lex.txt", symTable);
-
-	cout << "=== Токени ===" << endl;
-	Token token;
-
-	try {
-		do {
-			token = lexer.getNextToken();
-
-			if (token.type != TokenType::END_OF_FILE) {
-				cout << "Ред " << token.line << ", Колона " << token.col << " \t";
-				switch (token.type) {
-				case TokenType::KEYWORD: cout << "КЛЮЧОВА ДУМА | " << token.lexeme; break;
-				case TokenType::IDENTIFIER: cout << "ИДЕНТИФИКАТОР | " << token.lexeme << " (Поз: " << token.symTablePos << ")"; break;
-				case TokenType::NUMBER: cout << "ЧИСЛО | " << token.lexeme << " (Поз: " << token.symTablePos << ")"; break;
-				case TokenType::STRING_LITERAL: cout << "ТЕКСТ | " << token.lexeme; break;
-				case TokenType::OPERATOR: cout << "ОПЕРАТОР | " << token.lexeme; break;
-				case TokenType::DELIMITER: cout << "РАЗДЕЛИТЕЛ | " << token.lexeme; break;
-				case TokenType::COMMENT: cout << "КОМЕНТАР | " << token.lexeme; break;
-				}
-				cout << endl;
-			}
-		} while (token.type != TokenType::END_OF_FILE);
-
-		// Отпечатваме таблицата само ако лексикалният анализ е минал успешно
-		symTable.printTable();
-
-	}
-	catch (const runtime_error& e) {
-		cerr << "\nПРЕКЪСВАНЕ: " << e.what() << endl;
-	}*/
-
 	SymbolTable symTable;
-	Lexer lexer("Linklang_Test_Syn.txt", symTable);
+	Lexer lexer("syn_neg3.txt", symTable);
 	Parser parser(lexer);
 
 	try {
 		cout << "Стартиране на синтактичен анализ..." << endl;
-
 		parser.parseProgram();
 
-		cout << "УСПЕХ: Синтактичният анализ приключи без грешки!" << endl;
-		symTable.printTable();
-
+		if (parser.hadError()) {
+			cout << "\nГРЕШКА: Синтактичният анализ приключи с грешки. Междинен код няма да се генерира." << endl;
+		}
+		else {
+			cout << "\nУСПЕХ: Синтактичният анализ приключи без грешки!" << endl;
+			symTable.printTable();
+		}
 	}
 	catch (const runtime_error& e) {
-		cerr << "\nПРЕКЪСВАНЕ: " << e.what() << endl;
+		cerr << "\nКРИТИЧНО ПРЕКЪСВАНЕ: " << e.what() << endl;
 	}
 
 	return 0;
