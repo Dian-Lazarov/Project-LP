@@ -737,26 +737,49 @@ private:
 int main() {
 	system("chcp 1251 > nul");
 
-	SymbolTable symTable;
+	string filename;
 
-	try {
-		Lexer lexer("test_sem_neg.txt", symTable);
-		Parser parser(lexer, symTable);
+	while (true) {
+		cout << "\nLinklang Compiler" << endl;
+		cout << "--------------------------------------------" << endl << endl;
+		cout << "Enter <source.txt> (empty or exit to quit): ";
 
-		cout << "Стартиране на синтактичен анализ..." << endl;
-		parser.parseProgram();
+		getline(cin, filename);
 
-		if (parser.hadError()) {
-			cout << "\nГРЕШКА: Синтактичният анализ приключи с грешки. Междинен код няма да се генерира." << endl;
+		// Премахване на евентуални излишни интервали в началото и края
+		filename.erase(0, filename.find_first_not_of(" \t\r\n"));
+		filename.erase(filename.find_last_not_of(" \t\r\n") + 1);
+
+		// Условие за изход от програмата
+		if (filename.empty() || filename == "exit") {
+			break;
 		}
-		else {
-			cout << "\nУСПЕХ: Синтактичният анализ приключи без грешки!" << endl;
-			symTable.printTable();
+
+		// Инстанцираме таблицата ТУК, за да е празна за всеки нов файл
+		SymbolTable symTable;
+
+		try {
+			// Създаване на Lexer и Parser вътре в try блока
+			Lexer lexer(filename, symTable);
+			Parser parser(lexer, symTable);
+
+			cout << "Стартиране на синтактичен анализ..." << endl;
+			parser.parseProgram();
+
+			if (parser.hadError()) {
+				cout << "\nГРЕШКА: Синтактичният анализ приключи с грешки. Междинен код няма да се генерира." << endl;
+			}
+			else {
+				cout << "\nУСПЕХ: Синтактичният анализ приключи без грешки!" << endl;
+				symTable.printUnusedWarnings(); // Проверка за неизползвани променливи
+				symTable.printTable();
+			}
+
 		}
-	}
-	catch (const runtime_error& e) {
-		// При липсващ файл програмата ще скочи директно тук
-		cerr << "\nКРИТИЧНО ПРЕКЪСВАНЕ: " << e.what() << endl;
+		catch (const runtime_error& e) {
+			// Прихваща критични грешки (напр. липсващ файл) и продължава цикъла
+			cerr << "\nКРИТИЧНО ПРЕКЪСВАНЕ: " << e.what() << endl;
+		}
 	}
 
 	return 0;
