@@ -1,0 +1,9 @@
+core {
+    int a;
+    sem test;
+
+    a = 10;
+    init(test, 1);
+    wait(test);
+    signal(test);
+};

@@ -1,0 +1,4 @@
+core {
+  int alfa;
+  alfa = 10$;
+};

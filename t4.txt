@@ -1,0 +1,12 @@
+core {
+    int n, rev, quotient, digit;
+    xin(n);
+    rev = 0;
+    while (n > 0) {
+        quotient = n / 10;
+        digit = n - quotient * 10;
+        rev = rev * 10 + digit;
+        n = quotient;
+    }
+    xout(rev);
+};

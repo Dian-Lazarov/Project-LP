@@ -148,8 +148,8 @@ public:
 	Lexer(const string& filename, SymbolTable& table) : pos(0), line(1), col(1), symTable(table) {
 		ifstream file(filename);
 		if (!file.is_open()) {
-			cerr << "Грешка: Файлът " << filename << " не може да бъде отворен!" << endl;
-			return;
+			// Хвърляме изключение при невъзможност за отваряне
+			throw runtime_error("Файлът " + filename + " не може да бъде отворен!");
 		}
 		stringstream buffer;
 		buffer << file.rdbuf();
@@ -305,8 +305,12 @@ public:
 class Parser {
 private:
 	Lexer& lexer;
+	SymbolTable& symTable; // SEM: Обръщение към символната таблица
 	Token currentToken;
 	bool hasError = false; // Флаг за отчитане на грешки
+
+	// SEM: Брояч за временните променливи (TEMP)
+	int tempCount = 1;
 
 	// Извлича следващия токен, като автоматично прескача коментарите
 	void nextToken() {
@@ -332,6 +336,7 @@ private:
 	// Метод за възстановяване от синтактична грешка
 	void synchronize() {
 		hasError = true;
+
 		nextToken(); // Прескачаме проблемния токен
 
 		while (currentToken.type != TokenType::END_OF_FILE) {
@@ -356,9 +361,58 @@ private:
 		}
 	}
 
+	// ==========================================
+	// СЕМАНТИЧНИ МЕТОДИ
+	// ==========================================
+
+	void semanticError(const Token& t, const string& msg) {
+		throw runtime_error("Семантична грешка (Ред " + to_string(t.line) + ", Колона " + to_string(t.col) + "): " + msg);
+	}
+
+	// Деклариране на нов символ (проверява за M02)
+	void declareSymbol(const Token& t, SymbolClass cls) {
+		SymbolRecord& rec = symTable.getRecord(t.symTablePos);
+		if (rec.cls != SymbolClass::UNDEFINED) {
+			semanticError(t, "Повторна декларация на името '" + t.lexeme + "'");
+		}
+		else {
+			rec.cls = cls; // Задаваме съответния клас памет (PRIVATE, SHARED, SEM)
+		}
+	}
+
+	// Проверка при използване на променлива (проверява за M01 и M03)
+	void checkVarUsage(const Token& t) {
+		SymbolRecord& rec = symTable.getRecord(t.symTablePos);
+		if (rec.cls == SymbolClass::UNDEFINED) {
+			semanticError(t, "Използване на недекларирана променлива '" + t.lexeme + "'");
+			rec.cls = SymbolClass::PRIVATE_CLASS; // Потискане на повтарящи се грешки
+		}
+		else if (rec.cls == SymbolClass::SEM) {
+			semanticError(t, "Семафорът '" + t.lexeme + "' не може да се използва като променлива");
+		}
+	}
+
+	// Проверка при използване на семафор в init/wait/signal (проверява за M01 и M04)
+	void checkSemUsage(const Token& t) {
+		SymbolRecord& rec = symTable.getRecord(t.symTablePos);
+		if (rec.cls == SymbolClass::UNDEFINED) {
+			semanticError(t, "Използване на недекларирана променлива '" + t.lexeme + "'");
+			rec.cls = SymbolClass::SEM;
+		}
+		else if (rec.cls != SymbolClass::SEM) {
+			semanticError(t, "Аргументът '" + t.lexeme + "' в синхронизиращ примитив не е семафор");
+		}
+	}
+
+	// Създаване на временна променлива (TEMP) за междинни изчисления
+	int createTemp() {
+		string tempName = "&" + to_string(tempCount++);
+		return symTable.getOrInsert(tempName, 0, SymbolClass::TEMP, 0, 0);
+	}
+
 public:
-	Parser(Lexer& lex) : lexer(lex) {
-		nextToken(); // Инициализация с първия токен
+	Parser(Lexer& lex, SymbolTable& st) : lexer(lex), symTable(st) {
+		nextToken();
 	}
 
 	bool hadError() const {
@@ -397,19 +451,37 @@ private:
 		}
 	}
 
-	// decl -> "int" idlist ";"
+	// decl -> "int" idlist ";" | "shared" idlist ";" | "sem" idlist ";"
 	void parseDecl() {
-		match(TokenType::KEYWORD, "int");
-		parseIdList();
+		SymbolClass currentClass = SymbolClass::UNDEFINED;
+		if (currentToken.lexeme == "int") {
+			currentClass = SymbolClass::PRIVATE_CLASS;
+			match(TokenType::KEYWORD, "int");
+		}
+		else if (currentToken.lexeme == "shared") {
+			currentClass = SymbolClass::SHARED;
+			match(TokenType::KEYWORD, "shared");
+		}
+		else if (currentToken.lexeme == "sem") {
+			currentClass = SymbolClass::SEM;
+			match(TokenType::KEYWORD, "sem");
+		}
+
+		parseIdList(currentClass); // Предаваме класа памет надолу
 		match(TokenType::DELIMITER, ";");
 	}
 
 	// idlist -> Ident { "," Ident }
-	void parseIdList() {
+	void parseIdList(SymbolClass currentClass) {
+		Token idToken = currentToken;
 		match(TokenType::IDENTIFIER);
+		declareSymbol(idToken, currentClass); // Семантика: Декларираме символа
+
 		while (currentToken.type == TokenType::DELIMITER && currentToken.lexeme == ",") {
 			match(TokenType::DELIMITER, ",");
+			idToken = currentToken;
 			match(TokenType::IDENTIFIER);
+			declareSymbol(idToken, currentClass); // Семантика: Декларираме следващия
 		}
 	}
 
@@ -431,7 +503,7 @@ private:
 		}
 	}
 
-	// stm -> assign_stm ";" | if_stm | while_stm | for_stm | io_stm ";"
+	// stm -> assign_stm ";" | if_stm | while_stm | for_stm | io_stm | sync_stm ";"
 	void parseStm() {
 		if (currentToken.type == TokenType::IDENTIFIER) {
 			parseAssignStm();
@@ -450,11 +522,18 @@ private:
 			parseIoStm();
 			match(TokenType::DELIMITER, ";");
 		}
+		else if (currentToken.lexeme == "init" || currentToken.lexeme == "wait" || currentToken.lexeme == "signal") {
+			parseSyncStm();
+			match(TokenType::DELIMITER, ";");
+		}
 	}
 
 	// assign_stm -> Ident "=" expr
 	void parseAssignStm() {
+		Token idToken = currentToken;
 		match(TokenType::IDENTIFIER);
+		checkVarUsage(idToken); // Семантика: Проверка дали променливата може да бъде записвана
+
 		match(TokenType::OPERATOR, "=");
 		parseExpr();
 	}
@@ -511,7 +590,9 @@ private:
 		if (currentToken.lexeme == "xin") {
 			match(TokenType::KEYWORD, "xin");
 			match(TokenType::DELIMITER, "(");
+			Token idToken = currentToken;
 			match(TokenType::IDENTIFIER);
+			checkVarUsage(idToken); // Семантика: Проверка на аргумента на xin
 			match(TokenType::DELIMITER, ")");
 		}
 		else if (currentToken.lexeme == "xout") {
@@ -573,7 +654,9 @@ private:
 
 	void parseFactor() {
 		if (currentToken.type == TokenType::IDENTIFIER) {
+			Token idToken = currentToken;
 			match(TokenType::IDENTIFIER);
+			checkVarUsage(idToken); // Семантика: Проверка при четене
 		}
 		else if (currentToken.type == TokenType::NUMBER) {
 			match(TokenType::NUMBER);
@@ -596,16 +679,46 @@ private:
 				", Колона " + to_string(currentToken.col) + "): Невалиден израз.");
 		}
 	}
+
+	void parseSyncStm() {
+		if (currentToken.lexeme == "init") {
+			match(TokenType::KEYWORD, "init");
+			match(TokenType::DELIMITER, "(");
+			Token idToken = currentToken;
+			match(TokenType::IDENTIFIER);
+			checkSemUsage(idToken); // Семантика: Проверка дали е семафор
+			match(TokenType::DELIMITER, ",");
+			parseExpr();
+			match(TokenType::DELIMITER, ")");
+		}
+		else if (currentToken.lexeme == "wait") {
+			match(TokenType::KEYWORD, "wait");
+			match(TokenType::DELIMITER, "(");
+			Token idToken = currentToken;
+			match(TokenType::IDENTIFIER);
+			checkSemUsage(idToken); // Семантика: Проверка дали е семафор
+			match(TokenType::DELIMITER, ")");
+		}
+		else if (currentToken.lexeme == "signal") {
+			match(TokenType::KEYWORD, "signal");
+			match(TokenType::DELIMITER, "(");
+			Token idToken = currentToken;
+			match(TokenType::IDENTIFIER);
+			checkSemUsage(idToken); // Семантика: Проверка дали е семафор
+			match(TokenType::DELIMITER, ")");
+		}
+	}
 };
 
 int main() {
 	system("chcp 1251 > nul");
 
 	SymbolTable symTable;
-	Lexer lexer("syn_neg3.txt", symTable);
-	Parser parser(lexer);
 
 	try {
+		Lexer lexer("test_sem_neg.txt", symTable);
+		Parser parser(lexer, symTable);
+
 		cout << "Стартиране на синтактичен анализ..." << endl;
 		parser.parseProgram();
 
@@ -618,6 +731,7 @@ int main() {
 		}
 	}
 	catch (const runtime_error& e) {
+		// При липсващ файл програмата ще скочи директно тук
 		cerr << "\nКРИТИЧНО ПРЕКЪСВАНЕ: " << e.what() << endl;
 	}
 
