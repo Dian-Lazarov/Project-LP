@@ -25,6 +25,10 @@ struct SymbolRecord {
 	SymbolClass cls;
 	int val;
 	int addr;
+	// Полета за следене на неизползвани променливи
+	bool isUsed = false;
+	int declLine = 0;
+	int declCol = 0;
 };
 
 // ==========================================
@@ -84,6 +88,16 @@ public:
 				<< " | Стойност: " << records[i].val << endl;
 		}
 		cout << "------------------------\n";
+	}
+
+	// Функция за извеждане на предупреждения (W01)
+	void printUnusedWarnings() {
+		for (const auto& rec : records) {
+			if ((rec.cls == SymbolClass::PRIVATE_CLASS || rec.cls == SymbolClass::SHARED || rec.cls == SymbolClass::SEM) && !rec.isUsed) {
+				cout << "Предупреждение (Ред " << rec.declLine << ", Колона " << rec.declCol
+					<< "): Декларирана, но неизползвана променлива '" << rec.symbol << "'" << endl;
+			}
+		}
 	}
 };
 
@@ -377,12 +391,17 @@ private:
 		}
 		else {
 			rec.cls = cls; // Задаваме съответния клас памет (PRIVATE, SHARED, SEM)
+			// Запазваме позицията на декларацията
+			rec.declLine = t.line;
+			rec.declCol = t.col;
 		}
 	}
 
 	// Проверка при използване на променлива (проверява за M01 и M03)
 	void checkVarUsage(const Token& t) {
 		SymbolRecord& rec = symTable.getRecord(t.symTablePos);
+		rec.isUsed = true; // Маркираме променливата като използвана
+
 		if (rec.cls == SymbolClass::UNDEFINED) {
 			semanticError(t, "Използване на недекларирана променлива '" + t.lexeme + "'");
 			rec.cls = SymbolClass::PRIVATE_CLASS; // Потискане на повтарящи се грешки
@@ -395,6 +414,8 @@ private:
 	// Проверка при използване на семафор в init/wait/signal (проверява за M01 и M04)
 	void checkSemUsage(const Token& t) {
 		SymbolRecord& rec = symTable.getRecord(t.symTablePos);
+		rec.isUsed = true; // Маркираме семафора като използван
+
 		if (rec.cls == SymbolClass::UNDEFINED) {
 			semanticError(t, "Използване на недекларирана променлива '" + t.lexeme + "'");
 			rec.cls = SymbolClass::SEM;
@@ -434,6 +455,9 @@ public:
 			throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
 				"): Излишни символи след края на програмата.");
 		}
+
+		// След като всичко е парснато, извеждаме предупрежденията за неизползваните декларации
+		symTable.printUnusedWarnings();
 	}
 
 private:
