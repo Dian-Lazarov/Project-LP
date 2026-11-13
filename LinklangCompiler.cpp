@@ -73,6 +73,20 @@ public:
 		return records[position];
 	}
 
+	// Функция за разпределяне на адресите в паметта
+	int allocateAddresses() {
+		int addressCounter = 0; // Брояч за частния блок
+		for (auto& rec : records) {
+			// Отделяме памет само за променливи, които съществуват по време на изпълнение
+			if (rec.cls == SymbolClass::PRIVATE_CLASS || rec.cls == SymbolClass::SHARED ||
+				rec.cls == SymbolClass::SEM || rec.cls == SymbolClass::TEMP) {
+				rec.addr = addressCounter++;
+			}
+		}
+		// Връща общия размер на данните (data_size)
+		return addressCounter;
+	}
+
 	// Помощна функция за обновяване на адрес на символ след фазата на семантичен анализ
 	void updateAddress(int position, int newAddr) {
 		if (position >= 0 && position < records.size()) {
@@ -319,12 +333,29 @@ public:
 class Parser {
 private:
 	Lexer& lexer;
-	SymbolTable& symTable; // SEM: Обръщение към символната таблица
+	SymbolTable& symTable; // Обръщение към символната таблица
 	Token currentToken;
 	bool hasError = false; // Флаг за отчитане на грешки
 
-	// SEM: Брояч за временните променливи (TEMP)
+	// Брояч за временните променливи (TEMP)
 	int tempCount = 1;
+
+	// Структура за тетрада (quadruple)
+	struct Quadruple {
+		string op;    // Операция (+, -, *, /, =, xout, JMP и т.н.)
+		int arg1;     // Индекс в символната таблица на операнд 1 (-1, ако липсва)
+		int arg2;     // Индекс в символната таблица на операнд 2 (-1, ако липсва)
+		int result;   // Индекс в символната таблица за резултат (-1, ако липсва)
+	};
+
+	// Списък с генерирания междинен код
+	vector<Quadruple> quads;
+
+	// НОВО: Метод за генериране на нова тетрада
+	int emit(const string& op, int arg1, int arg2, int result) {
+		quads.push_back({ op, arg1, arg2, result });
+		return quads.size() - 1; // Връща номера на инструкцията
+	}
 
 	// Извлича следващия токен, като автоматично прескача коментарите
 	void nextToken() {
@@ -333,7 +364,7 @@ private:
 		} while (currentToken.type == TokenType::COMMENT);
 	}
 
-	// Проверява дали текущият токен съвпада с очаквания. Ако да - продължава напред.
+	// Проверява дали текущият токен съвпада с очаквания. Ако да - продължава напред
 	void match(TokenType expectedType, const string& expectedLexeme = "") {
 		if (currentToken.type == expectedType &&
 			(expectedLexeme == "" || currentToken.lexeme == expectedLexeme)) {
@@ -442,22 +473,48 @@ public:
 
 	// program -> "core" "{" decl_part stm_list "}" ";"
 	void parseProgram() {
-		match(TokenType::KEYWORD, "core");
-		match(TokenType::DELIMITER, "{");
+		try {
+			match(TokenType::KEYWORD, "core");
+			match(TokenType::DELIMITER, "{");
 
-		parseDeclPart();
-		parseStmList();
+			parseDeclPart();
+			parseStmList();
 
-		match(TokenType::DELIMITER, "}");
-		match(TokenType::DELIMITER, ";");
+			match(TokenType::DELIMITER, "}");
+			match(TokenType::DELIMITER, ";");
 
-		if (currentToken.type != TokenType::END_OF_FILE) {
-			throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
-				"): Излишни символи след края на програмата.");
+			if (currentToken.type != TokenType::END_OF_FILE) {
+				throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
+					"): Излишни символи след края на програмата.");
+			}
+
+			// =================================
+			// Изчисляване на entry и image_size
+			// =================================
+			if (!hasError) {
+				int entry = 0; // Кодът започва от инструкция 0
+				int data_size = symTable.allocateAddresses(); // Разпределя адресите
+				int image_size = quads.size() + data_size; // Общият размер на програмата в паметта
+
+				// Отпечатване на междинния код (тетради)
+				cout << "\n=== Междинен код (тетради) ===" << endl;
+				for (size_t i = 0; i < quads.size(); ++i) {
+					string a1 = (quads[i].arg1 != -1) ? symTable.getRecord(quads[i].arg1).symbol : "-";
+					string a2 = (quads[i].arg2 != -1) ? symTable.getRecord(quads[i].arg2).symbol : "-";
+					string res = (quads[i].result != -1) ? symTable.getRecord(quads[i].result).symbol : "-";
+
+					cout << i << ": (" << quads[i].op << ", " << a1 << ", " << a2 << ", " << res << ")" << endl;
+				}
+				cout << "\nENTRY = " << entry << endl;
+				cout << "IMAGE_SIZE = " << image_size << " (" << quads.size() << " инстр. + " << data_size << " данни)\n" << endl;
+			}
+			symTable.printUnusedWarnings();
+
 		}
-
-		// След като всичко е парснато, извеждаме предупрежденията за неизползваните декларации
-		symTable.printUnusedWarnings();
+		catch (const runtime_error& e) {
+			cerr << e.what() << endl;
+			hasError = true;
+		}
 	}
 
 private:
@@ -556,10 +613,12 @@ private:
 	void parseAssignStm() {
 		Token idToken = currentToken;
 		match(TokenType::IDENTIFIER);
-		checkVarUsage(idToken); // Семантика: Проверка дали променливата може да бъде записвана
+		checkVarUsage(idToken);
 
 		match(TokenType::OPERATOR, "=");
-		parseExpr();
+
+		int exprRes = parseExpr(); // Изчисляваме дясната част
+		emit("=", exprRes, -1, idToken.symTablePos); // Генерираме инструкция за запис
 	}
 
 	// if_stm -> "if" "(" expr ")" "{" stm_list "}" [ "else" "{" stm_list "}" ]
@@ -616,92 +675,135 @@ private:
 			match(TokenType::DELIMITER, "(");
 			Token idToken = currentToken;
 			match(TokenType::IDENTIFIER);
-			checkVarUsage(idToken); // Семантика: Проверка на аргумента на xin
+			checkVarUsage(idToken);
+
+			emit("xin", idToken.symTablePos, -1, -1); // Тетрада за вход
+
 			match(TokenType::DELIMITER, ")");
 		}
 		else if (currentToken.lexeme == "xout") {
 			match(TokenType::KEYWORD, "xout");
 			match(TokenType::DELIMITER, "(");
 			if (currentToken.type == TokenType::STRING_LITERAL) {
+				Token strToken = currentToken;
 				match(TokenType::STRING_LITERAL);
+
+				// Добавяме текста като CONST_CLASS, за да имаме адрес в таблицата
+				int strId = symTable.getOrInsert(strToken.lexeme, 0, SymbolClass::CONST_CLASS, 0, 0);
+				emit("xout", strId, -1, -1);
 			}
 			else {
-				parseExpr();
+				int exprRes = parseExpr();
+				emit("xout", exprRes, -1, -1); // Тетрада за изход на променлива
 			}
 			match(TokenType::DELIMITER, ")");
 		}
 	}
 
-	// Изразите (Expression parsing rules)
-	void parseExpr() {
-		parseAndExpr();
+	// Генериране на междинен код за изразите
+	int parseExpr() {
+		int left = parseAndExpr();
 		while (currentToken.lexeme == "or") {
 			match(TokenType::KEYWORD, "or");
-			parseAndExpr();
+			int right = parseAndExpr();
+			int temp = createTemp();
+			emit("or", left, right, temp);
+			left = temp;
 		}
+		return left;
 	}
 
-	void parseAndExpr() {
-		parseRelExpr();
+	int parseAndExpr() {
+		int left = parseRelExpr();
 		while (currentToken.lexeme == "and") {
 			match(TokenType::KEYWORD, "and");
-			parseRelExpr();
+			int right = parseRelExpr();
+			int temp = createTemp();
+			emit("and", left, right, temp);
+			left = temp;
 		}
+		return left;
 	}
 
-	void parseRelExpr() {
-		parseAddExpr();
+	int parseRelExpr() {
+		int left = parseAddExpr();
 		if (currentToken.type == TokenType::OPERATOR &&
 			(currentToken.lexeme == "<" || currentToken.lexeme == "<=" ||
 				currentToken.lexeme == ">" || currentToken.lexeme == ">=" ||
 				currentToken.lexeme == "?=" || currentToken.lexeme == "@=")) {
+			string op = currentToken.lexeme;
 			match(TokenType::OPERATOR);
-			parseAddExpr();
+			int right = parseAddExpr();
+			int temp = createTemp();
+			emit(op, left, right, temp);
+			left = temp;
 		}
+		return left;
 	}
 
-	void parseAddExpr() {
-		parseTerm();
+	int parseAddExpr() {
+		int left = parseTerm();
 		while (currentToken.lexeme == "+" || currentToken.lexeme == "-") {
+			string op = currentToken.lexeme;
 			match(TokenType::OPERATOR);
-			parseTerm();
+			int right = parseTerm();
+			int temp = createTemp();
+			emit(op, left, right, temp);
+			left = temp;
 		}
+		return left;
 	}
 
-	void parseTerm() {
-		parseFactor();
+	int parseTerm() {
+		int left = parseFactor();
 		while (currentToken.lexeme == "*" || currentToken.lexeme == "/") {
+			string op = currentToken.lexeme;
 			match(TokenType::OPERATOR);
-			parseFactor();
+			int right = parseFactor();
+			int temp = createTemp();
+			emit(op, left, right, temp);
+			left = temp;
 		}
+		return left;
 	}
 
-	void parseFactor() {
+	int parseFactor() {
 		if (currentToken.type == TokenType::IDENTIFIER) {
 			Token idToken = currentToken;
 			match(TokenType::IDENTIFIER);
-			checkVarUsage(idToken); // Семантика: Проверка при четене
+			checkVarUsage(idToken);
+			return idToken.symTablePos; // Връщаме индекса на променливата
 		}
 		else if (currentToken.type == TokenType::NUMBER) {
+			Token numToken = currentToken;
 			match(TokenType::NUMBER);
+			return numToken.symTablePos; // Връщаме индекса на константата
 		}
 		else if (currentToken.lexeme == "(") {
 			match(TokenType::DELIMITER, "(");
-			parseExpr();
+			int res = parseExpr();
 			match(TokenType::DELIMITER, ")");
+			return res;
 		}
 		else if (currentToken.lexeme == "not") {
 			match(TokenType::KEYWORD, "not");
-			parseFactor();
+			int right = parseFactor();
+			int temp = createTemp();
+			emit("not", right, -1, temp);
+			return temp;
 		}
 		else if (currentToken.lexeme == "-") {
 			match(TokenType::OPERATOR, "-");
-			parseFactor();
+			int right = parseFactor();
+			int temp = createTemp();
+			emit("uminus", right, -1, temp);
+			return temp;
 		}
 		else {
 			throw runtime_error("Синтактична грешка (Ред " + to_string(currentToken.line) +
 				", Колона " + to_string(currentToken.col) + "): Невалиден израз.");
 		}
+		return -1;
 	}
 
 	void parseSyncStm() {
