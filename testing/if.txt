@@ -1,0 +1,9 @@
+core {
+    int a, b, c;
+
+    if (a < b + 5) {
+        a = b + c * 2;
+    } else {
+        a = b - c;
+    }
+};

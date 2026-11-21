@@ -1,8 +1,10 @@
 core {
-    int a, b, c, res;
+    int a, b, c, result;
+    
     a = 10;
     b = 4;
     c = 2;
-    res = a + b * 3 - (a + b) / c;
-    xout(res);
+    
+    result = a + b * c - (a + b) / -c;
+    xout(result);
 };

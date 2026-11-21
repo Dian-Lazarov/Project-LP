@@ -351,10 +351,17 @@ private:
 	// Списък с генерирания междинен код
 	vector<Quadruple> quads;
 
-	// НОВО: Метод за генериране на нова тетрада
+	// Метод за генериране на нова тетрада
 	int emit(const string& op, int arg1, int arg2, int result) {
 		quads.push_back({ op, arg1, arg2, result });
 		return quads.size() - 1; // Връща номера на инструкцията
+	}
+
+	// Обратно кърпене (backpatching) на целевия адрес при преход (BRZ / JMP)
+	void patch(int quadIndex, int targetAddress) {
+		if (quadIndex >= 0 && quadIndex < (int)quads.size()) {
+			quads[quadIndex].arg1 = targetAddress;
+		}
 	}
 
 	// Извлича следващия токен, като автоматично прескача коментарите
@@ -499,7 +506,14 @@ public:
 				// Отпечатване на междинния код (тетради)
 				cout << "\n=== Междинен код (тетради) ===" << endl;
 				for (size_t i = 0; i < quads.size(); ++i) {
-					string a1 = (quads[i].arg1 != -1) ? symTable.getRecord(quads[i].arg1).symbol : "-";
+					string a1;
+					if (quads[i].op == "BRZ" || quads[i].op == "JMP") {
+						a1 = (quads[i].arg1 != -1) ? to_string(quads[i].arg1) : "?";
+					}
+					else {
+						a1 = (quads[i].arg1 != -1) ? symTable.getRecord(quads[i].arg1).symbol : "-";
+					}
+
 					string a2 = (quads[i].arg2 != -1) ? symTable.getRecord(quads[i].arg2).symbol : "-";
 					string res = (quads[i].result != -1) ? symTable.getRecord(quads[i].result).symbol : "-";
 
@@ -625,18 +639,34 @@ private:
 	void parseIfStm() {
 		match(TokenType::KEYWORD, "if");
 		match(TokenType::DELIMITER, "(");
-		parseExpr();
+		int condRes = parseExpr();
 		match(TokenType::DELIMITER, ")");
+
+		// Ако условието е 0 (лъжа), прескачаме then-блока (адресът още не е известен)
+		int brzIndex = emit("BRZ", -1, condRes, -1);
 
 		match(TokenType::DELIMITER, "{");
 		parseStmList();
 		match(TokenType::DELIMITER, "}");
 
 		if (currentToken.type == TokenType::KEYWORD && currentToken.lexeme == "else") {
+			// В края на then-блока добавяме безусловен преход, който да прескочи else-блока
+			int jmpOverElse = emit("JMP", -1, -1, -1);
+
+			// Кърпим BRZ да скача точно в началото на else-блока
+			patch(brzIndex, (int)quads.size());
+
 			match(TokenType::KEYWORD, "else");
 			match(TokenType::DELIMITER, "{");
 			parseStmList();
 			match(TokenType::DELIMITER, "}");
+
+			// Кърпим JMP да скача след края на else-блока
+			patch(jmpOverElse, (int)quads.size());
+		}
+		else {
+			// Няма else: кърпим BRZ да скача директно след then-блока
+			patch(brzIndex, (int)quads.size());
 		}
 	}
 
@@ -644,28 +674,63 @@ private:
 	void parseWhileStm() {
 		match(TokenType::KEYWORD, "while");
 		match(TokenType::DELIMITER, "(");
-		parseExpr();
+
+		// Запомняме началото на проверката на условието
+		int loopStart = (int)quads.size();
+		int condRes = parseExpr();
 		match(TokenType::DELIMITER, ")");
+
+		// Ако условието е 0, излизаме след края на цикъла
+		int brzIndex = emit("BRZ", -1, condRes, -1);
 
 		match(TokenType::DELIMITER, "{");
 		parseStmList();
 		match(TokenType::DELIMITER, "}");
+
+		// Връщане в началото на условието
+		emit("JMP", loopStart, -1, -1);
+
+		// Кърпим BRZ да сочи към първата инструкция след цикъла
+		patch(brzIndex, (int)quads.size());
 	}
 
 	// for_stm -> "for" "(" assign_stm ";" expr ";" assign_stm ")" "{" stm_list "}"
 	void parseForStm() {
 		match(TokenType::KEYWORD, "for");
 		match(TokenType::DELIMITER, "(");
+
+		// 1. Инициализация (изпълнява се веднъж преди цикъла)
 		parseAssignStm();
 		match(TokenType::DELIMITER, ";");
-		parseExpr();
+
+		// 2. Условие
+		int condStart = (int)quads.size();
+		int condRes = parseExpr();
 		match(TokenType::DELIMITER, ";");
+
+		// При лъжа излизаме след цикъла; при истина прескачаме стъпката към тялото
+		int brzExit = emit("BRZ", -1, condRes, -1);
+		int jmpToBody = emit("JMP", -1, -1, -1);
+
+		// 3. Стъпка (изпълнява се след всяко преминаване на тялото)
+		int stepStart = (int)quads.size();
 		parseAssignStm();
 		match(TokenType::DELIMITER, ")");
+		emit("JMP", condStart, -1, -1); // След стъпката се връщаме към условието
+
+		// 4. Тяло на цикъла
+		int bodyStart = (int)quads.size();
+		patch(jmpToBody, bodyStart); // Кърпим прехода от условието към началото на тялото
 
 		match(TokenType::DELIMITER, "{");
 		parseStmList();
 		match(TokenType::DELIMITER, "}");
+
+		// След тялото правим безусловен преход към стъпката
+		emit("JMP", stepStart, -1, -1);
+
+		// Кърпим условния преход да сочи след края на цикъла
+		patch(brzExit, (int)quads.size());
 	}
 
 	// io_stm -> "xin" "(" Ident ")" | "xout" "(" expr ")" | "xout" "(" String ")"

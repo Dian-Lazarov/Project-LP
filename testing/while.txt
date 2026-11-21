@@ -1,0 +1,7 @@
+core {
+int a, b, c;
+
+while(a < b + 5) {
+ a = b + c * 123;
+ }
+};
